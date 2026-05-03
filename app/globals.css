@@ -152,4 +152,17 @@
 
   /* Clip-path reveal base */
   .clip-reveal { clip-path: inset(0 100% 0 0); }
+
+  /* Audio toggle visualizer bars */
+  .audio-bar {
+    animation-name: audioBar;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+    animation-timing-function: ease-in-out;
+  }
+  @keyframes audioBar {
+    0%   { transform: scaleY(0.25); }
+    50%  { transform: scaleY(0.75); }
+    100% { transform: scaleY(1); }
+  }
 }

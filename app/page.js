@@ -146,8 +146,9 @@ function Hero3D() {
     const container = ref.current
     if (!container || typeof window === 'undefined') return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (window.matchMedia('(max-width: 768px)').matches) return  // skip 3D entirely on mobile
 
-    const isMobile = window.matchMedia('(max-width: 768px)').matches
+    const isMobile = false  // we no-op above, but keep variable for clarity
 
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 100)
@@ -448,6 +449,161 @@ function splitChars(text) {
   ))
 }
 
+// --- Ambient audio (Web Audio API, generative drone + minor pad) ---
+function useAmbient() {
+  const ctxRef = useRef(null)
+  const masterRef = useRef(null)
+  const targetVolRef = useRef(0.32)
+  const [enabled, setEnabled] = useState(false)
+  const startedRef = useRef(false)
+
+  const ensureGraph = () => {
+    if (ctxRef.current) return ctxRef.current
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return null
+    const ctx = new Ctx()
+    ctxRef.current = ctx
+
+    const master = ctx.createGain()
+    master.gain.value = 0
+    masterRef.current = master
+
+    // Soft master limiter via DynamicsCompressor (prevents harshness)
+    const comp = ctx.createDynamicsCompressor()
+    comp.threshold.value = -18
+    comp.knee.value = 12
+    comp.ratio.value = 6
+    comp.attack.value = 0.05
+    comp.release.value = 0.4
+    master.connect(comp).connect(ctx.destination)
+
+    // Drone bass (sine 55Hz with slow detune wobble)
+    const drone = ctx.createOscillator()
+    drone.type = 'sine'
+    drone.frequency.value = 55
+    const droneLFO = ctx.createOscillator()
+    droneLFO.frequency.value = 0.07
+    const droneLFOGain = ctx.createGain()
+    droneLFOGain.gain.value = 1.4
+    droneLFO.connect(droneLFOGain).connect(drone.frequency)
+    const droneGain = ctx.createGain()
+    droneGain.gain.value = 0.45
+    drone.connect(droneGain).connect(master)
+    drone.start(); droneLFO.start()
+
+    // Pad chord — A minor (A2, C3, E3) → 110, 130.81, 164.81
+    const notes = [110, 130.81, 164.81, 220]
+    notes.forEach((freq, i) => {
+      const osc1 = ctx.createOscillator()
+      const osc2 = ctx.createOscillator()
+      osc1.type = 'triangle'
+      osc2.type = 'sine'
+      osc1.frequency.value = freq
+      osc2.frequency.value = freq * 1.0035
+
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.value = 700 + i * 80
+      filter.Q.value = 0.6
+
+      const lfo = ctx.createOscillator()
+      lfo.frequency.value = 0.06 + i * 0.025
+      const lfoGain = ctx.createGain()
+      lfoGain.gain.value = 90
+      lfo.connect(lfoGain).connect(filter.frequency)
+
+      const gain = ctx.createGain()
+      gain.gain.value = 0.07 + (i === 3 ? -0.02 : 0)
+
+      osc1.connect(filter)
+      osc2.connect(filter)
+      filter.connect(gain).connect(master)
+
+      osc1.start(); osc2.start(); lfo.start()
+    })
+
+    // Soft shimmer — high sine drifting in slowly
+    const shim = ctx.createOscillator()
+    shim.type = 'sine'
+    shim.frequency.value = 880
+    const shimLFO = ctx.createOscillator()
+    shimLFO.frequency.value = 0.04
+    const shimLFOGain = ctx.createGain()
+    shimLFOGain.gain.value = 8
+    shimLFO.connect(shimLFOGain).connect(shim.frequency)
+    const shimGain = ctx.createGain()
+    shimGain.gain.value = 0.018
+    shim.connect(shimGain).connect(master)
+    shim.start(); shimLFO.start()
+
+    return ctx
+  }
+
+  const start = () => {
+    const ctx = ensureGraph()
+    if (!ctx) return
+    if (ctx.state === 'suspended') ctx.resume()
+    const m = masterRef.current
+    m.gain.cancelScheduledValues(ctx.currentTime)
+    m.gain.linearRampToValueAtTime(targetVolRef.current, ctx.currentTime + 1.4)
+    startedRef.current = true
+    setEnabled(true)
+    try { sessionStorage.setItem('ak-ambient', '1') } catch (e) {}
+  }
+
+  const stop = () => {
+    const ctx = ctxRef.current
+    if (!ctx || !masterRef.current) { setEnabled(false); return }
+    masterRef.current.gain.cancelScheduledValues(ctx.currentTime)
+    masterRef.current.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.6)
+    setEnabled(false)
+    try { sessionStorage.setItem('ak-ambient', '0') } catch (e) {}
+  }
+
+  const setVolumeFromScroll = (p) => {
+    targetVolRef.current = computeVolume(p)
+    if (!enabled || !masterRef.current || !ctxRef.current) return
+    masterRef.current.gain.setTargetAtTime(targetVolRef.current, ctxRef.current.currentTime, 0.6)
+  }
+
+  return { enabled, start, stop, setVolumeFromScroll }
+}
+
+// Volume curve: full at hero (0-12%), dip in middle scenes (35-65%), rise at CTA (>85%)
+function computeVolume(p) {
+  if (p < 0.12) return 0.32
+  if (p < 0.35) return 0.32 - (p - 0.12) / 0.23 * 0.18  // 0.32 → 0.14
+  if (p < 0.65) return 0.14
+  if (p < 0.85) return 0.14 + (p - 0.65) / 0.20 * 0.18  // 0.14 → 0.32
+  return 0.34
+}
+
+function AmbientToggle({ enabled, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      data-hover
+      aria-label={enabled ? 'Mute ambient sound' : 'Play ambient sound'}
+      className="fixed bottom-5 left-5 md:bottom-6 md:left-6 z-[60] glass rounded-full pl-3 pr-4 py-2 flex items-center gap-2.5 text-[10px] tracking-[0.25em] uppercase text-ink hover:bg-white transition"
+    >
+      <span className="flex items-end gap-[2px] h-3 w-4">
+        {[0, 1, 2, 3].map(i => (
+          <span
+            key={i}
+            className={`w-[2px] bg-current rounded-full origin-bottom ${enabled ? 'audio-bar' : ''}`}
+            style={{
+              height: enabled ? '100%' : '30%',
+              animationDelay: `${i * 0.12}s`,
+              animationDuration: `${0.7 + (i % 2) * 0.4}s`,
+            }}
+          />
+        ))}
+      </span>
+      <span>{enabled ? 'Sound · on' : 'Sound · off'}</span>
+    </button>
+  )
+}
+
 // --- GENESIS: scroll-scrubbed canvas image sequence ---
 // 4-phase generative animation: noise → lattice → clusters → ring (intelligence)
 function GenesisCanvas({ progressRef }) {
@@ -609,12 +765,12 @@ function Genesis({ progressRef }) {
       <div className="absolute inset-0 pointer-events-none font-mono">
         <span data-speed="0.4" className="gn-label absolute top-[14%] left-[7%] text-[10px] tracking-[0.3em] uppercase text-white/45">η = 0.001</span>
         <span data-speed="0.7" className="gn-label absolute top-[20%] right-[12%] text-[10px] tracking-[0.3em] uppercase text-white/45">tokens · 8192</span>
-        <span data-speed="0.5" className="gn-label absolute bottom-[36%] left-[14%] text-[10px] tracking-[0.3em] uppercase text-white/45">loss · 4.2e-3</span>
+        <span data-speed="0.5" className="gn-label absolute bottom-[36%] left-[14%] text-[10px] tracking-[0.3em] uppercase text-white/45 hidden md:inline">loss · 4.2e-3</span>
         <span data-speed="0.9" className="gn-label absolute bottom-[28%] right-[8%] text-[10px] tracking-[0.3em] uppercase text-white/45">recall@20 · 0.91</span>
-        <span data-speed="0.6" className="gn-label absolute top-[46%] left-[5%] text-[10px] tracking-[0.3em] uppercase text-white/45">batch · 64</span>
-        <span data-speed="0.8" className="gn-label absolute top-[62%] right-[6%] text-[10px] tracking-[0.3em] uppercase text-white/45">layer · 24</span>
-        <span data-speed="0.3" className="gn-label absolute top-[8%] right-[34%] text-[10px] tracking-[0.3em] uppercase text-white/40">σ · noise</span>
-        <span data-speed="0.55" className="gn-label absolute bottom-[10%] left-[40%] text-[10px] tracking-[0.3em] uppercase text-white/40">∇ · descent</span>
+        <span data-speed="0.6" className="gn-label absolute top-[46%] left-[5%] text-[10px] tracking-[0.3em] uppercase text-white/45 hidden md:inline">batch · 64</span>
+        <span data-speed="0.8" className="gn-label absolute top-[62%] right-[6%] text-[10px] tracking-[0.3em] uppercase text-white/45 hidden md:inline">layer · 24</span>
+        <span data-speed="0.3" className="gn-label absolute top-[8%] right-[34%] text-[10px] tracking-[0.3em] uppercase text-white/40 hidden md:inline">σ · noise</span>
+        <span data-speed="0.55" className="gn-label absolute bottom-[10%] left-[40%] text-[10px] tracking-[0.3em] uppercase text-white/40 hidden md:inline">∇ · descent</span>
       </div>
 
       {/* TOP overlay — title + progress meter */}
@@ -656,6 +812,7 @@ export default function Page() {
   const [loaded, setLoaded] = useState(false)
   const scope = useRef(null)
   const genesisProgress = useRef(0)
+  const ambient = useAmbient()
 
   useLayoutEffect(() => {
     if (!loaded) return
@@ -710,7 +867,8 @@ export default function Page() {
       })
 
       const track = document.querySelector('.proj-track')
-      if (track) {
+      const isDesktop = window.matchMedia('(min-width: 768px)').matches
+      if (track && isDesktop) {
         const totalX = track.scrollWidth - window.innerWidth
         gsap.to(track, {
           x: -totalX, ease: 'none',
@@ -801,6 +959,12 @@ export default function Page() {
         scrollTrigger: { trigger: '#cta', start: 'top 70%' }
       })
 
+      // Global scroll → ambient volume scrub (only audible when user enables sound)
+      ScrollTrigger.create({
+        start: 0, end: 'max',
+        onUpdate: (self) => ambient.setVolumeFromScroll(self.progress),
+      })
+
       ScrollTrigger.refresh()
     }, scope)
     return () => ctx.revert()
@@ -810,6 +974,7 @@ export default function Page() {
     <div ref={scope} className="relative">
       {!loaded && <Preloader onDone={() => setLoaded(true)} />}
       <Cursor />
+      <AmbientToggle enabled={ambient.enabled} onToggle={ambient.enabled ? ambient.stop : ambient.start} />
 
       {/* NAV */}
       <nav className="fixed top-0 left-0 right-0 z-50 mix-blend-difference">
@@ -1013,8 +1178,8 @@ export default function Page() {
         </div>
       </section>
 
-      {/* SCENE 6 — PROJECTS horizontal */}
-      <section id="projects" className="relative h-screen w-full overflow-hidden bg-[hsl(var(--bone))]">
+      {/* SCENE 6 — PROJECTS horizontal (desktop only) */}
+      <section id="projects" className="relative h-screen w-full overflow-hidden bg-[hsl(var(--bone))] hidden md:block">
         <div className="absolute top-0 left-0 right-0 px-6 md:px-10 pt-10 z-20 flex items-end justify-between mix-blend-difference text-[hsl(var(--bone))]">
           <div>
             <div className="text-xs tracking-[0.3em] uppercase opacity-70 mb-2">— 06 / Case studies</div>
@@ -1065,6 +1230,50 @@ export default function Page() {
               <div className="font-display text-4xl md:text-6xl tracking-[-0.03em]">More, <span className="font-serif-display italic">on request.</span></div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* SCENE 6 — PROJECTS vertical stack (mobile only) */}
+      <section id="projects-mobile" className="md:hidden relative bg-[hsl(var(--bone))] px-5 py-20">
+        <div className="mb-10">
+          <div className="text-[10px] tracking-[0.3em] uppercase text-muted mb-2">— 06 / Case studies</div>
+          <h2 className="font-display text-4xl tracking-[-0.03em]">Selected <span className="font-serif-display italic">work.</span></h2>
+        </div>
+        <div className="space-y-6">
+          {PROJECTS.map((p, i) => (
+            <article key={i} className="proj-m-card relative rounded-2xl overflow-hidden bg-white border border-line">
+              <div className="relative h-48 overflow-hidden bg-[hsl(var(--paper))]">
+                <img src={p.img} alt={p.title} className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(79,70,229,0.20), rgba(6,182,212,0.10))' }} />
+                <div className="absolute top-4 left-4 text-white">
+                  <div className="font-display text-4xl tabular-nums leading-none drop-shadow-lg">{p.num}</div>
+                  <div className="text-[9px] tracking-[0.25em] uppercase mt-1 opacity-90">{p.tag}</div>
+                </div>
+              </div>
+              <div className="p-6">
+                <h3 className="font-display text-2xl leading-[1.1] tracking-[-0.02em] mb-5">{p.title}</h3>
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <div className="text-[9px] tracking-[0.3em] uppercase text-muted mb-1">Problem</div>
+                    <p className="text-ink-soft leading-relaxed">{p.problem}</p>
+                  </div>
+                  <div>
+                    <div className="text-[9px] tracking-[0.3em] uppercase text-muted mb-1">Approach</div>
+                    <p className="text-ink-soft leading-relaxed">{p.solution}</p>
+                  </div>
+                  <div>
+                    <div className="text-[9px] tracking-[0.3em] uppercase text-muted mb-1">Impact</div>
+                    <p className="font-display text-base tracking-tight text-ink">{p.impact}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-5 border-t border-line mt-5">
+                  {p.stack.map(s => (
+                    <span key={s} className="px-2 py-0.5 rounded-full bg-[hsl(var(--paper))] text-[10px]">{s}</span>
+                  ))}
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
