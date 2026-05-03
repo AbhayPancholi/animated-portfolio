@@ -279,9 +279,214 @@ function splitChars(text) {
   ))
 }
 
+// --- GENESIS: scroll-scrubbed canvas image sequence ---
+// 4-phase generative animation: noise → lattice → clusters → ring (intelligence)
+function GenesisCanvas({ progressRef }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    let w = 0, h = 0, dpr = 1, raf
+    const N = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches ? 380 : 720
+    let particles = []
+    const easeInOut = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+
+    const buildTargets = () => {
+      particles = new Array(N)
+      const cols = 36, rows = 18
+      const clusterCount = 6
+      for (let i = 0; i < N; i++) {
+        // T0 — noise (chaos)
+        const t0 = { x: Math.random() * w, y: Math.random() * h }
+        // T1 — lattice (structure)
+        const ci = i % cols, ri = Math.floor(i / cols) % rows
+        const t1 = {
+          x: w * 0.10 + (ci + 0.5) * (w * 0.80) / cols,
+          y: h * 0.22 + (ri + 0.5) * (h * 0.56) / rows,
+        }
+        // T2 — clusters (intelligence forming)
+        const cIdx = i % clusterCount
+        const cAng = (cIdx / clusterCount) * Math.PI * 2 - Math.PI / 2
+        const cx = w / 2 + Math.cos(cAng) * Math.min(w, h) * 0.26
+        const cy = h / 2 + Math.sin(cAng) * Math.min(w, h) * 0.22
+        const rr = Math.pow(Math.random(), 0.6) * 70
+        const aa = Math.random() * Math.PI * 2
+        const t2 = { x: cx + Math.cos(aa) * rr, y: cy + Math.sin(aa) * rr }
+        // T3 — ring (impact / converged)
+        const ringA = (i / N) * Math.PI * 2
+        const ringR = Math.min(w, h) * 0.30
+        const t3 = {
+          x: w / 2 + Math.cos(ringA) * ringR,
+          y: h / 2 + Math.sin(ringA) * ringR,
+        }
+        particles[i] = { t0, t1, t2, t3, x: t0.x, y: t0.y, seed: Math.random() }
+      }
+    }
+
+    const resize = () => {
+      dpr = Math.min(window.devicePixelRatio || 1, 2)
+      w = canvas.offsetWidth
+      h = canvas.offsetHeight
+      canvas.width = w * dpr
+      canvas.height = h * dpr
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      buildTargets()
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    const draw = () => {
+      const p = Math.max(0, Math.min(1, progressRef.current || 0))
+      const seg = p * 3
+      const phase = Math.min(2, Math.floor(seg))
+      const tt = easeInOut(seg - phase)
+      const keys = ['t0', 't1', 't2', 't3']
+      const now = performance.now() * 0.0006
+
+      ctx.clearRect(0, 0, w, h)
+
+      // update positions
+      for (let i = 0; i < N; i++) {
+        const pt = particles[i]
+        const a = pt[keys[phase]], b = pt[keys[phase + 1]]
+        let x = a.x + (b.x - a.x) * tt
+        let y = a.y + (b.y - a.y) * tt
+        // gentle drift in early phases, calm at impact
+        const drift = (1 - p) * 6 + 2
+        x += Math.sin(now + pt.seed * 12) * drift
+        y += Math.cos(now * 1.3 + pt.seed * 7) * drift
+        pt.x = x; pt.y = y
+      }
+
+      // edges — appear in build phase, peak at intelligence, fade at impact
+      const edgeWeight =
+        p < 0.18 ? 0
+        : p < 0.55 ? (p - 0.18) / 0.37
+        : p < 0.85 ? 1
+        : Math.max(0, 1 - (p - 0.85) / 0.15)
+
+      if (edgeWeight > 0.02) {
+        const threshold = 55 + p * 50
+        const t2sq = threshold * threshold
+        ctx.lineWidth = 0.5
+        const hue = 240 - p * 60   // indigo -> cyan
+        for (let i = 0; i < N; i++) {
+          const a = particles[i]
+          const lim = Math.min(N, i + 7)
+          for (let j = i + 1; j < lim; j++) {
+            const b = particles[j]
+            const dx = a.x - b.x, dy = a.y - b.y
+            const d2 = dx * dx + dy * dy
+            if (d2 < t2sq) {
+              const alpha = (1 - Math.sqrt(d2) / threshold) * edgeWeight * 0.45
+              ctx.strokeStyle = `hsla(${hue}, 80%, 65%, ${alpha})`
+              ctx.beginPath()
+              ctx.moveTo(a.x, a.y)
+              ctx.lineTo(b.x, b.y)
+              ctx.stroke()
+            }
+          }
+        }
+      }
+
+      // points
+      const radius = 1.4 + p * 1.8
+      for (let i = 0; i < N; i++) {
+        const pt = particles[i]
+        const hue = 240 - p * 70 + (pt.seed * 24 - 12)
+        const light = 70 + p * 14
+        const al = 0.65 + p * 0.30
+        ctx.fillStyle = `hsla(${hue}, 92%, ${light}%, ${al})`
+        ctx.beginPath()
+        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // central glow at the impact phase
+      if (p > 0.7) {
+        const k = (p - 0.7) / 0.3
+        const cg = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.min(w, h) * 0.42)
+        cg.addColorStop(0, `rgba(167, 139, 250, ${0.22 * k})`)
+        cg.addColorStop(0.5, `rgba(56, 189, 248, ${0.10 * k})`)
+        cg.addColorStop(1, 'rgba(0, 0, 0, 0)')
+        ctx.fillStyle = cg
+        ctx.fillRect(0, 0, w, h)
+      }
+
+      raf = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize) }
+  }, [progressRef])
+  return <canvas ref={ref} className="absolute inset-0 w-full h-full" />
+}
+
+const GENESIS_PHASES = [
+  { k: 'Problem',      t: 'Most data is noise.',                    d: 'Logs. Events. Streams that whisper nothing.' },
+  { k: 'Build',        t: 'I weave structure through it.',          d: 'Pipelines. Schemas. The boring spine of every model.' },
+  { k: 'Intelligence', t: 'Patterns emerge. The system thinks.',    d: 'Embeddings cluster. Loss curves bend. A model arrives.' },
+  { k: 'Impact',       t: 'Quietly, in production.',                d: 'No demo. Throughput, latency, money saved.' },
+]
+
+function Genesis({ progressRef }) {
+  return (
+    <section id="genesis" className="relative h-screen w-full overflow-hidden bg-[hsl(var(--ink))] text-white">
+      <GenesisCanvas progressRef={progressRef} />
+      {/* radial vignette over canvas */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at center, transparent 30%, hsl(var(--ink) / 0.55) 95%)' }} />
+
+      {/* parallax floating labels */}
+      <div className="absolute inset-0 pointer-events-none font-mono">
+        <span data-speed="0.4" className="gn-label absolute top-[14%] left-[7%] text-[10px] tracking-[0.3em] uppercase text-white/45">η = 0.001</span>
+        <span data-speed="0.7" className="gn-label absolute top-[20%] right-[12%] text-[10px] tracking-[0.3em] uppercase text-white/45">tokens · 8192</span>
+        <span data-speed="0.5" className="gn-label absolute bottom-[36%] left-[14%] text-[10px] tracking-[0.3em] uppercase text-white/45">loss · 4.2e-3</span>
+        <span data-speed="0.9" className="gn-label absolute bottom-[28%] right-[8%] text-[10px] tracking-[0.3em] uppercase text-white/45">recall@20 · 0.91</span>
+        <span data-speed="0.6" className="gn-label absolute top-[46%] left-[5%] text-[10px] tracking-[0.3em] uppercase text-white/45">batch · 64</span>
+        <span data-speed="0.8" className="gn-label absolute top-[62%] right-[6%] text-[10px] tracking-[0.3em] uppercase text-white/45">layer · 24</span>
+        <span data-speed="0.3" className="gn-label absolute top-[8%] right-[34%] text-[10px] tracking-[0.3em] uppercase text-white/40">σ · noise</span>
+        <span data-speed="0.55" className="gn-label absolute bottom-[10%] left-[40%] text-[10px] tracking-[0.3em] uppercase text-white/40">∇ · descent</span>
+      </div>
+
+      {/* TOP overlay — title + progress meter */}
+      <div className="absolute top-0 left-0 right-0 px-6 md:px-10 pt-32 flex items-start justify-between pointer-events-none">
+        <div>
+          <div className="text-xs tracking-[0.3em] uppercase opacity-60 mb-3">— 07 / Genesis</div>
+          <h2 className="font-display text-3xl md:text-5xl tracking-[-0.03em] leading-[1.05] max-w-md">
+            How <span className="font-serif-display italic">intelligence</span> takes shape.
+          </h2>
+        </div>
+        <div className="hidden md:flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase text-white/60 font-mono">
+          <span className="gn-progress-num tabular-nums">00</span>
+          <div className="w-40 h-px bg-white/15 relative overflow-hidden">
+            <div className="gn-progress-bar absolute inset-0 bg-[hsl(var(--cyan))] origin-left scale-x-0" />
+          </div>
+          <span>scrub</span>
+        </div>
+      </div>
+
+      {/* BOTTOM — phase storytelling cards (4) */}
+      <div className="absolute bottom-0 left-0 right-0 px-6 md:px-10 pb-14 grid grid-cols-12 gap-4 md:gap-6 pointer-events-none">
+        {GENESIS_PHASES.map((s, i) => (
+          <div key={i} data-phase={i} className="gn-panel col-span-6 md:col-span-3 opacity-30 will-change-transform">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-mono text-[10px] tabular-nums text-[hsl(var(--cyan))]">0{i + 1}</span>
+              <div className="h-px flex-1 bg-white/10" />
+              <span className="text-[10px] tracking-[0.3em] uppercase text-white/55">{s.k}</span>
+            </div>
+            <div className="font-display text-lg md:text-2xl leading-[1.2] tracking-tight mb-2">{s.t}</div>
+            <div className="text-xs text-white/50 leading-relaxed hidden md:block">{s.d}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function Page() {
   const [loaded, setLoaded] = useState(false)
   const scope = useRef(null)
+  const genesisProgress = useRef(0)
 
   useLayoutEffect(() => {
     if (!loaded) return
@@ -348,6 +553,70 @@ export default function Page() {
         y: 0, opacity: 1, stagger: 0.1, duration: 1, ease: 'expo.out',
         scrollTrigger: { trigger: '#deeptech', start: 'top 60%' }
       })
+
+      // GENESIS — scroll-scrubbed image sequence (GSAP-pinned)
+      const genesis = document.getElementById('genesis')
+      if (genesis) {
+        const setProgress = gsap.quickTo(genesisProgress, 'current', { duration: 0.35, ease: 'power3.out' })
+        const PIN_DURATION = '+=3600'  // 4.5 viewport heights of scrub
+        ScrollTrigger.create({
+          trigger: genesis,
+          start: 'top top',
+          end: PIN_DURATION,
+          scrub: true,
+          pin: true,
+          anticipatePin: 1,
+          onUpdate: (self) => {
+            setProgress(self.progress)
+            const numEl = document.querySelector('.gn-progress-num')
+            if (numEl) numEl.textContent = String(Math.round(self.progress * 100)).padStart(2, '0')
+          },
+        })
+        // progress bar fill
+        gsap.to('.gn-progress-bar', {
+          scaleX: 1, ease: 'none',
+          scrollTrigger: { trigger: genesis, start: 'top top', end: PIN_DURATION, scrub: true }
+        })
+        // phase panels highlight in their scroll window
+        gsap.utils.toArray('.gn-panel').forEach((panel) => {
+          const i = parseInt(panel.dataset.phase || '0', 10)
+          const startPct = i * 25
+          const peakPct = i * 25 + 10
+          const fadeOutStart = (i + 1) * 25 - 4
+          gsap.fromTo(panel,
+            { opacity: 0.18, y: 24, filter: 'blur(2px)' },
+            {
+              opacity: 1, y: 0, filter: 'blur(0px)',
+              scrollTrigger: {
+                trigger: genesis,
+                start: `top+=${startPct * 36} top`,
+                end: `top+=${peakPct * 36} top`,
+                scrub: true,
+              }
+            }
+          )
+          gsap.to(panel, {
+            opacity: 0.22, y: -12, filter: 'blur(2px)',
+            scrollTrigger: {
+              trigger: genesis,
+              start: `top+=${fadeOutStart * 36} top`,
+              end: `top+=${(fadeOutStart + 6) * 36} top`,
+              scrub: true,
+            }
+          })
+        })
+        // parallax floating labels
+        gsap.utils.toArray('.gn-label').forEach((el) => {
+          const speed = parseFloat(el.dataset.speed || '0.5')
+          gsap.fromTo(el,
+            { y: 80 * speed, opacity: 0.25 },
+            {
+              y: -80 * speed, opacity: 0.85, ease: 'none',
+              scrollTrigger: { trigger: genesis, start: 'top top', end: PIN_DURATION, scrub: true }
+            }
+          )
+        })
+      }
 
       gsap.fromTo('.break-text', { scale: 0.85, opacity: 0 }, {
         scale: 1, opacity: 1,
@@ -621,6 +890,9 @@ export default function Page() {
           </div>
         </div>
       </section>
+
+      {/* SCENE 6.5 — GENESIS (scroll-scrubbed canvas sequence) */}
+      <Genesis progressRef={genesisProgress} />
 
       {/* SCENE 7 — DEEP TECH */}
       <section id="deeptech" className="relative bg-[hsl(var(--ink))] text-[hsl(var(--bone))] overflow-hidden">
