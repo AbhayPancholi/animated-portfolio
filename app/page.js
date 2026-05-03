@@ -604,6 +604,59 @@ function AmbientToggle({ enabled, onToggle }) {
   )
 }
 
+// --- Unified scene atmosphere: one continuous backdrop morphing through the scroll journey ---
+function SceneAtmosphere() {
+  return (
+    <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+      {/* Base warm light */}
+      <div className="atmo-light absolute inset-0" style={{ background: 'hsl(var(--bone))' }} />
+      {/* Soft color blobs — drifting hero-style atmosphere */}
+      <div
+        className="atmo-blobs absolute -inset-[10%]"
+        style={{
+          background: `
+            radial-gradient(60vw 50vh at 18% 22%, hsla(236, 79%, 58%, 0.18), transparent 60%),
+            radial-gradient(55vw 45vh at 82% 28%, hsla(262, 80%, 64%, 0.20), transparent 60%),
+            radial-gradient(65vw 50vh at 60% 78%, hsla(188, 94%, 48%, 0.16), transparent 60%),
+            radial-gradient(50vw 40vh at 12% 80%, hsla(28, 82%, 62%, 0.15), transparent 60%)
+          `,
+          willChange: 'transform, opacity',
+        }}
+      />
+      {/* Dim violet wash — fades in mid-journey */}
+      <div
+        className="atmo-dusk absolute inset-0 opacity-0"
+        style={{
+          background: `
+            radial-gradient(70vw 60vh at 30% 40%, hsla(262, 80%, 30%, 0.55), transparent 65%),
+            radial-gradient(60vw 50vh at 75% 60%, hsla(236, 79%, 35%, 0.55), transparent 65%)
+          `,
+        }}
+      />
+      {/* Full deep ink overlay — for cinematic dark scenes */}
+      <div className="atmo-dark absolute inset-0 opacity-0" style={{ background: 'hsl(var(--ink))' }} />
+      {/* Dark-scene glow blobs (visible only when atmo-dark is on) */}
+      <div
+        className="atmo-dark-blobs absolute -inset-[10%] opacity-0 mix-blend-screen"
+        style={{
+          background: `
+            radial-gradient(50vw 45vh at 25% 30%, hsla(236, 79%, 58%, 0.40), transparent 60%),
+            radial-gradient(55vw 50vh at 78% 70%, hsla(262, 80%, 64%, 0.36), transparent 60%),
+            radial-gradient(45vw 40vh at 50% 50%, hsla(188, 94%, 48%, 0.22), transparent 60%)
+          `,
+        }}
+      />
+      {/* Subtle film grain on top */}
+      <div
+        className="absolute inset-0 opacity-[0.08] mix-blend-multiply"
+        style={{
+          backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
+        }}
+      />
+    </div>
+  )
+}
+
 // --- GENESIS: scroll-scrubbed canvas image sequence ---
 // 4-phase generative animation: noise → lattice → clusters → ring (intelligence)
 function GenesisCanvas({ progressRef }) {
@@ -852,11 +905,56 @@ export default function Page() {
         scrollTrigger: { trigger: '#identity', start: 'top top', end: '+=2600', scrub: true }
       })
 
-      gsap.utils.toArray('.bento').forEach((tile) => {
-        gsap.fromTo(tile, { y: 60, opacity: 0 }, {
-          y: 0, opacity: 1, duration: 1, ease: 'expo.out',
-          scrollTrigger: { trigger: tile, start: 'top 85%', toggleActions: 'play none none reverse' }
-        })
+      gsap.utils.toArray('.bento').forEach((tile, i) => {
+        // each card enters from a unique angle/direction for cinematic feel
+        const recipes = [
+          { x: -120, y: 80, rotate: -6, scale: 0.85 },   // AI hero tile from left
+          { x: 140, y: 60, rotate: 5, scale: 0.9 },      // Backend from right
+          { x: -100, y: 120, rotate: -4, scale: 0.9 },   // Data from below-left
+          { x: 100, y: 120, rotate: 4, scale: 0.9 },     // Frontend from below-right
+          { x: 160, y: -40, rotate: 6, scale: 0.9 },     // Metrics from above-right
+        ]
+        const r = recipes[i % recipes.length]
+        gsap.fromTo(tile,
+          { x: r.x, y: r.y, rotate: r.rotate, scale: r.scale, opacity: 0 },
+          {
+            x: 0, y: 0, rotate: 0, scale: 1, opacity: 1,
+            ease: 'expo.out',
+            scrollTrigger: {
+              trigger: tile,
+              start: 'top 90%',
+              end: 'top 55%',
+              scrub: 1,
+            }
+          }
+        )
+        // subtle hover/idle float continues (set by inline animation below)
+      })
+
+      // Skills section title — scrub-scale on entry
+      gsap.fromTo('#skills .skills-title',
+        { scale: 1.3, y: 60, opacity: 0.4, letterSpacing: '0em' },
+        {
+          scale: 1, y: 0, opacity: 1, letterSpacing: '-0.03em',
+          ease: 'power2.out',
+          scrollTrigger: { trigger: '#skills', start: 'top 90%', end: 'top 30%', scrub: 1 }
+        }
+      )
+
+      // Skills "spotlight" colored highlight cycles through bento tiles based on scroll
+      gsap.utils.toArray('.bento').forEach((tile, i) => {
+        gsap.fromTo(tile,
+          { boxShadow: '0 0 0 rgba(0,0,0,0)' },
+          {
+            boxShadow: i === 0
+              ? '0 30px 80px -20px rgba(139, 92, 246, 0.45)'
+              : i === 1 ? '0 20px 60px -15px rgba(79, 70, 229, 0.30)'
+              : i === 2 ? '0 20px 60px -15px rgba(6, 182, 212, 0.30)'
+              : i === 3 ? '0 20px 60px -15px rgba(28, 130, 220, 0.30)'
+              : '0 20px 60px -15px rgba(167, 139, 250, 0.40)',
+            scrollTrigger: { trigger: tile, start: 'top 70%', end: 'top 30%', scrub: 1 }
+          }
+        )
       })
 
       gsap.utils.toArray('.exp-row').forEach((row) => {
@@ -868,9 +966,10 @@ export default function Page() {
 
       const track = document.querySelector('.proj-track')
       const isDesktop = window.matchMedia('(min-width: 768px)').matches
+      let projTween = null
       if (track && isDesktop) {
         const totalX = track.scrollWidth - window.innerWidth
-        gsap.to(track, {
+        projTween = gsap.to(track, {
           x: -totalX, ease: 'none',
           scrollTrigger: {
             trigger: '#projects', start: 'top top',
@@ -959,6 +1058,94 @@ export default function Page() {
         scrollTrigger: { trigger: '#cta', start: 'top 70%' }
       })
 
+      // ===== UNIFIED ATMOSPHERE — scroll-tied color journey across the entire site =====
+      // Slow parallax drift on the soft pastel blobs
+      gsap.to('.atmo-blobs', {
+        backgroundPosition: '50% 100%',
+        rotate: 8,
+        scale: 1.15,
+        ease: 'none',
+        scrollTrigger: { start: 0, end: 'max', scrub: 1 },
+      })
+      // Dusk wash fades in around skills/experience, peaks before projects, fades for break, returns at CTA
+      gsap.timeline({ scrollTrigger: { start: 0, end: 'max', scrub: 1 } })
+        .to('.atmo-dusk', { opacity: 0, duration: 0.18 }, 0)        // hero/identity: clear
+        .to('.atmo-dusk', { opacity: 0.55, duration: 0.22 })         // skills/exp: dusk creeping in
+        .to('.atmo-dusk', { opacity: 1, duration: 0.15 })            // projects entry: full dusk
+        .to('.atmo-dusk', { opacity: 0.85, duration: 0.10 })         // genesis: handed to dark layer
+        .to('.atmo-dusk', { opacity: 0, duration: 0.10 })            // break: clear
+        .to('.atmo-dusk', { opacity: 0.85, duration: 0.10 })         // cta entry
+        .to('.atmo-dusk', { opacity: 1, duration: 0.20 })            // cta full
+
+      // Deep ink layer: appears for projects-end → genesis → deeptech → CTA
+      gsap.timeline({ scrollTrigger: { start: 0, end: 'max', scrub: 1 } })
+        .to('.atmo-dark', { opacity: 0, duration: 0.40 }, 0)         // hero..exp: light
+        .to('.atmo-dark', { opacity: 0.30, duration: 0.10 })         // late projects: dim
+        .to('.atmo-dark', { opacity: 0.95, duration: 0.10 })         // genesis: dark
+        .to('.atmo-dark', { opacity: 0.95, duration: 0.10 })         // deeptech: stays dark
+        .to('.atmo-dark', { opacity: 0, duration: 0.08 })            // break: light release
+        .to('.atmo-dark', { opacity: 0.95, duration: 0.10 })         // cta: epic dark
+        .to('.atmo-dark', { opacity: 1, duration: 0.12 })            // footer: full
+
+      // Glowing dark blobs ride along with atmo-dark
+      gsap.timeline({ scrollTrigger: { start: 0, end: 'max', scrub: 1 } })
+        .to('.atmo-dark-blobs', { opacity: 0, duration: 0.40 }, 0)
+        .to('.atmo-dark-blobs', { opacity: 0.6, duration: 0.10 })
+        .to('.atmo-dark-blobs', { opacity: 1, duration: 0.10 })
+        .to('.atmo-dark-blobs', { opacity: 1, duration: 0.10 })
+        .to('.atmo-dark-blobs', { opacity: 0, duration: 0.08 })
+        .to('.atmo-dark-blobs', { opacity: 1, duration: 0.10 })
+        .to('.atmo-dark-blobs', { opacity: 0.85, duration: 0.12 })
+
+      // ===== Section heading scrub reveals — every section breathes on entry =====
+      gsap.utils.toArray('.scene-title').forEach((el) => {
+        gsap.fromTo(el,
+          { y: 80, scale: 1.15, opacity: 0.3, filter: 'blur(8px)' },
+          {
+            y: 0, scale: 1, opacity: 1, filter: 'blur(0px)',
+            ease: 'power2.out',
+            scrollTrigger: { trigger: el, start: 'top 95%', end: 'top 35%', scrub: 1 }
+          }
+        )
+      })
+
+      // ===== PROJECTS — per-card cinematic atmosphere =====
+      // Each card emits a colored ambient glow that bleeds into the scene as it enters viewport.
+      // Big numeric scrubs through the entire horizontal track.
+      gsap.utils.toArray('.proj-card').forEach((card, i) => {
+        const ambient = card.querySelector('.proj-ambient')
+        const numEl = card.querySelector('.proj-bignum')
+        const stats = card.querySelectorAll('.proj-stat')
+        if (!projTween) return
+        if (ambient) {
+          gsap.fromTo(ambient,
+            { opacity: 0, scale: 0.6 },
+            {
+              opacity: 1, scale: 1, ease: 'none',
+              scrollTrigger: { trigger: card, containerAnimation: projTween, start: 'left 80%', end: 'left 30%', scrub: 1 }
+            }
+          )
+        }
+        if (numEl) {
+          gsap.fromTo(numEl,
+            { yPercent: 100, opacity: 0 },
+            {
+              yPercent: 0, opacity: 1, ease: 'expo.out',
+              scrollTrigger: { trigger: card, containerAnimation: projTween, start: 'left 80%', end: 'left 50%', scrub: 1 }
+            }
+          )
+        }
+        if (stats.length) {
+          gsap.fromTo(stats,
+            { y: 30, opacity: 0 },
+            {
+              y: 0, opacity: 1, stagger: 0.15, ease: 'expo.out',
+              scrollTrigger: { trigger: card, containerAnimation: projTween, start: 'left 70%', end: 'left 30%', scrub: 1 }
+            }
+          )
+        }
+      })
+
       // Global scroll → ambient volume scrub (only audible when user enables sound)
       ScrollTrigger.create({
         start: 0, end: 'max',
@@ -975,6 +1162,7 @@ export default function Page() {
       {!loaded && <Preloader onDone={() => setLoaded(true)} />}
       <Cursor />
       <AmbientToggle enabled={ambient.enabled} onToggle={ambient.enabled ? ambient.stop : ambient.start} />
+      <SceneAtmosphere />
 
       {/* NAV */}
       <nav className="fixed top-0 left-0 right-0 z-50 mix-blend-difference">
@@ -1039,7 +1227,7 @@ export default function Page() {
       </section>
 
       {/* SCENE 3 — IDENTITY REVEAL */}
-      <section id="identity" className="relative h-screen w-full bg-[hsl(var(--bone))] overflow-hidden">
+      <section id="identity" className="relative h-screen w-full overflow-hidden">
         <div className="identity-orb absolute -top-40 -right-40 w-[700px] h-[700px] rounded-full opacity-70 blur-3xl"
           style={{ background: 'linear-gradient(120deg, hsl(var(--electric)) 0%, hsl(var(--violet)) 50%, hsl(var(--cyan)) 100%)', backgroundSize: '200% 200%' }} />
         <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-16 max-w-[1400px] mx-auto">
@@ -1058,12 +1246,12 @@ export default function Page() {
       </section>
 
       {/* SCENE 4 — SKILLS BENTO */}
-      <section id="skills" className="relative bg-[hsl(var(--bone))] px-6 md:px-10 py-24 md:py-40">
+      <section id="skills" className="relative px-6 md:px-10 py-24 md:py-40">
         <div className="max-w-[1400px] mx-auto">
           <div className="flex items-end justify-between mb-16">
             <div>
               <div className="text-xs tracking-[0.3em] uppercase text-muted mb-4">— 04 / Toolkit</div>
-              <h2 className="font-display text-5xl md:text-7xl tracking-[-0.03em]">The <span className="font-serif-display italic">stack</span></h2>
+              <h2 className="skills-title scene-title font-display text-5xl md:text-7xl tracking-[-0.03em] will-change-transform">The <span className="font-serif-display italic gradient-text">stack</span></h2>
             </div>
             <div className="hidden md:block text-sm text-muted max-w-sm">
               Not a laundry list. A working understanding of how these pieces fit — and when to leave them out.
@@ -1138,11 +1326,11 @@ export default function Page() {
       </section>
 
       {/* SCENE 5 — EXPERIENCE TIMELINE */}
-      <section id="experience" className="relative bg-[hsl(var(--bone))] px-6 md:px-10 py-24 md:py-40 border-t border-line">
+      <section id="experience" className="relative px-6 md:px-10 py-24 md:py-40 border-t border-line">
         <div className="max-w-[1400px] mx-auto grid grid-cols-12 gap-6">
           <div className="col-span-12 md:col-span-4 md:sticky md:top-28 md:self-start">
             <div className="text-xs tracking-[0.3em] uppercase text-muted mb-4">— 05 / Trajectory</div>
-            <h2 className="font-display text-5xl md:text-7xl tracking-[-0.03em] leading-[0.95]">Six<br/><span className="font-serif-display italic">years.</span><br/>Four chapters.</h2>
+            <h2 className="scene-title font-display text-5xl md:text-7xl tracking-[-0.03em] leading-[0.95]">Six<br/><span className="font-serif-display italic">years.</span><br/>Four chapters.</h2>
             <p className="mt-6 text-muted text-sm max-w-xs">Each role taught me one thing: most problems are <em className="font-serif-display italic">not</em> model problems.</p>
           </div>
           <div className="col-span-12 md:col-span-8 md:col-start-5">
@@ -1179,51 +1367,60 @@ export default function Page() {
       </section>
 
       {/* SCENE 6 — PROJECTS horizontal (desktop only) */}
-      <section id="projects" className="relative h-screen w-full overflow-hidden bg-[hsl(var(--bone))] hidden md:block">
+      <section id="projects" className="relative h-screen w-full overflow-hidden hidden md:block">
         <div className="absolute top-0 left-0 right-0 px-6 md:px-10 pt-10 z-20 flex items-end justify-between mix-blend-difference text-[hsl(var(--bone))]">
           <div>
             <div className="text-xs tracking-[0.3em] uppercase opacity-70 mb-2">— 06 / Case studies</div>
-            <h2 className="font-display text-4xl md:text-6xl tracking-[-0.03em]">Selected <span className="font-serif-display italic">work.</span></h2>
+            <h2 className="scene-title font-display text-4xl md:text-6xl tracking-[-0.03em]">Selected <span className="font-serif-display italic">work.</span></h2>
           </div>
           <div className="text-xs tracking-[0.25em] uppercase opacity-70 hidden md:block">Scroll ←→</div>
         </div>
         <div className="proj-track absolute top-0 left-0 h-full flex items-center will-change-transform" style={{ paddingLeft: '6vw', paddingRight: '6vw' }}>
-          {PROJECTS.map((p, i) => (
+          {PROJECTS.map((p, i) => {
+            const themes = [
+              { glow: 'radial-gradient(circle at 30% 30%, rgba(79,70,229,0.55), transparent 65%)' },
+              { glow: 'radial-gradient(circle at 70% 30%, rgba(139,92,246,0.55), transparent 65%)' },
+              { glow: 'radial-gradient(circle at 50% 50%, rgba(6,182,212,0.50), transparent 65%)' },
+              { glow: 'radial-gradient(circle at 30% 70%, rgba(28,130,220,0.50), transparent 65%)' },
+            ]
+            return (
             <article key={i} className="proj-card relative shrink-0 w-[88vw] md:w-[72vw] h-[78vh] mr-6 md:mr-10 rounded-[28px] overflow-hidden bg-white border border-line flex flex-col md:flex-row">
-              <div className="relative md:w-[55%] h-56 md:h-full overflow-hidden bg-[hsl(var(--paper))]">
+              {/* Per-card ambient glow that bleeds into the scene */}
+              <div className="proj-ambient absolute -inset-20 pointer-events-none" style={{ background: themes[i % themes.length].glow, filter: 'blur(40px)' }} />
+              <div className="relative md:w-[55%] h-56 md:h-full overflow-hidden bg-[hsl(var(--paper))] z-10">
                 <img src={p.img} alt={p.title} className="proj-img absolute inset-0 w-full h-full object-cover" />
                 <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(79,70,229,0.18), rgba(6,182,212,0.10))' }} />
                 <div className="absolute top-6 left-6 text-white">
-                  <div className="font-display text-7xl tabular-nums leading-none drop-shadow-lg">{p.num}</div>
+                  <div className="overflow-hidden"><div className="proj-bignum font-display text-7xl tabular-nums leading-none drop-shadow-lg">{p.num}</div></div>
                   <div className="text-xs tracking-[0.25em] uppercase mt-2 opacity-90">{p.tag}</div>
                 </div>
               </div>
-              <div className="md:w-[45%] p-8 md:p-12 flex flex-col justify-between">
+              <div className="md:w-[45%] p-8 md:p-12 flex flex-col justify-between z-10 relative">
                 <div>
                   <h3 className="font-display text-3xl md:text-5xl leading-[1.05] tracking-[-0.02em] mb-8">{p.title}</h3>
                   <div className="space-y-5">
-                    <div>
+                    <div className="proj-stat">
                       <div className="text-[10px] tracking-[0.3em] uppercase text-muted mb-1">Problem</div>
                       <p className="text-ink-soft leading-relaxed">{p.problem}</p>
                     </div>
-                    <div>
+                    <div className="proj-stat">
                       <div className="text-[10px] tracking-[0.3em] uppercase text-muted mb-1">Approach</div>
                       <p className="text-ink-soft leading-relaxed">{p.solution}</p>
                     </div>
-                    <div>
+                    <div className="proj-stat">
                       <div className="text-[10px] tracking-[0.3em] uppercase text-muted mb-1">Impact</div>
                       <p className="font-display text-xl tracking-tight text-ink">{p.impact}</p>
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5 pt-6 border-t border-line mt-6">
+                <div className="proj-stat flex flex-wrap gap-1.5 pt-6 border-t border-line mt-6">
                   {p.stack.map(s => (
                     <span key={s} className="px-2.5 py-1 rounded-full bg-[hsl(var(--paper))] text-xs">{s}</span>
                   ))}
                 </div>
               </div>
             </article>
-          ))}
+          )})}
           <div className="shrink-0 w-[50vw] h-[78vh] flex items-center">
             <div className="px-10">
               <div className="text-xs tracking-[0.3em] uppercase text-muted mb-3">End of reel</div>
@@ -1234,7 +1431,7 @@ export default function Page() {
       </section>
 
       {/* SCENE 6 — PROJECTS vertical stack (mobile only) */}
-      <section id="projects-mobile" className="md:hidden relative bg-[hsl(var(--bone))] px-5 py-20">
+      <section id="projects-mobile" className="md:hidden relative px-5 py-20">
         <div className="mb-10">
           <div className="text-[10px] tracking-[0.3em] uppercase text-muted mb-2">— 06 / Case studies</div>
           <h2 className="font-display text-4xl tracking-[-0.03em]">Selected <span className="font-serif-display italic">work.</span></h2>
@@ -1310,7 +1507,7 @@ export default function Page() {
       </section>
 
       {/* SCENE 8 — BREAK */}
-      <section id="break" className="relative bg-[hsl(var(--bone))] px-6 md:px-10 py-40 md:py-56 flex items-center justify-center">
+      <section id="break" className="relative px-6 md:px-10 py-40 md:py-56 flex items-center justify-center">
         <div className="text-center max-w-5xl">
           <div className="break-text font-serif-display italic text-ink text-6xl md:text-[9vw] leading-[0.95] tracking-[-0.02em]">
             Code is craft.
