@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import * as THREE from 'three'
 import { ArrowUpRight, Mail, Github, Linkedin, Twitter } from 'lucide-react'
 
 const PROJECTS = [
@@ -136,6 +137,174 @@ function Preloader({ onDone }) {
       </div>
     </div>
   )
+}
+
+// --- Hero3D: cinematic Three.js wireframe icosahedron with dust halo ---
+function Hero3D() {
+  const ref = useRef(null)
+  useEffect(() => {
+    const container = ref.current
+    if (!container || typeof window === 'undefined') return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const isMobile = window.matchMedia('(max-width: 768px)').matches
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 100)
+    // Offset upper-right so typography stays the focal point
+    camera.position.set(-1.4, -0.7, 6.0)
+    camera.lookAt(0, 0, 0)
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+    renderer.setSize(container.offsetWidth, container.offsetHeight)
+    renderer.setClearColor(0x000000, 0)
+    container.appendChild(renderer.domElement)
+
+    // Outer + inner icosahedrons for moiré depth
+    const detail = isMobile ? 1 : 2
+    const outerGeo = new THREE.IcosahedronGeometry(1.55, detail)
+    const innerGeo = new THREE.IcosahedronGeometry(1.05, detail - 1 < 0 ? 0 : detail - 1)
+
+    // Vertex color gradient (indigo -> violet -> cyan)
+    const applyGradient = (geo) => {
+      const pos = geo.attributes.position
+      const colors = new Float32Array(pos.count * 3)
+      const a = new THREE.Color('#4f46e5')
+      const b = new THREE.Color('#a78bfa')
+      const c = new THREE.Color('#06b6d4')
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i)
+        const t = (y + 1.6) / 3.2
+        const col = t < 0.5 ? a.clone().lerp(b, t * 2) : b.clone().lerp(c, (t - 0.5) * 2)
+        colors[i * 3 + 0] = col.r
+        colors[i * 3 + 1] = col.g
+        colors[i * 3 + 2] = col.b
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    }
+    applyGradient(outerGeo)
+    applyGradient(innerGeo)
+
+    // Outer wireframe
+    const outerEdges = new THREE.EdgesGeometry(outerGeo, 1)
+    const outerLineMat = new THREE.LineBasicMaterial({
+      color: 0x0b0b10, transparent: true, opacity: 0.42
+    })
+    const outerLine = new THREE.LineSegments(outerEdges, outerLineMat)
+
+    // Outer faint fill (vertex colors, low alpha)
+    const outerFillMat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.06, side: THREE.DoubleSide
+    })
+    const outerFill = new THREE.Mesh(outerGeo, outerFillMat)
+
+    // Inner glowing wireframe
+    const innerEdges = new THREE.EdgesGeometry(innerGeo, 1)
+    const innerLineMat = new THREE.LineBasicMaterial({
+      color: 0x4f46e5, transparent: true, opacity: 0.40
+    })
+    const innerLine = new THREE.LineSegments(innerEdges, innerLineMat)
+
+    const innerFillMat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.12, side: THREE.DoubleSide
+    })
+    const innerFill = new THREE.Mesh(innerGeo, innerFillMat)
+
+    const group = new THREE.Group()
+    group.add(outerFill, outerLine, innerFill, innerLine)
+    scene.add(group)
+
+    // Dust particles around
+    const dustCount = isMobile ? 240 : 600
+    const dustGeo = new THREE.BufferGeometry()
+    const dPos = new Float32Array(dustCount * 3)
+    const dCol = new Float32Array(dustCount * 3)
+    const baseCol = new THREE.Color()
+    for (let i = 0; i < dustCount; i++) {
+      const r = 1.9 + Math.pow(Math.random(), 0.7) * 2.6
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      dPos[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta)
+      dPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+      dPos[i * 3 + 2] = r * Math.cos(phi)
+      // Color: lerp between indigo and cyan based on radius
+      const t = (r - 1.9) / 2.6
+      baseCol.setHSL(0.66 - t * 0.18, 0.85, 0.55)
+      dCol[i * 3 + 0] = baseCol.r
+      dCol[i * 3 + 1] = baseCol.g
+      dCol[i * 3 + 2] = baseCol.b
+    }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3))
+    dustGeo.setAttribute('color', new THREE.BufferAttribute(dCol, 3))
+    const dustMat = new THREE.PointsMaterial({
+      size: 0.018, vertexColors: true, transparent: true, opacity: 0.7,
+      sizeAttenuation: true, depthWrite: false,
+    })
+    const dust = new THREE.Points(dustGeo, dustMat)
+    scene.add(dust)
+
+    // Cursor parallax
+    let tmx = 0, tmy = 0, mx = 0, my = 0
+    const onMove = (e) => {
+      tmx = (e.clientX / window.innerWidth - 0.5) * 2
+      tmy = (e.clientY / window.innerHeight - 0.5) * 2
+    }
+    window.addEventListener('mousemove', onMove)
+
+    const resize = () => {
+      const w = container.offsetWidth, h = container.offsetHeight
+      if (w === 0 || h === 0) return
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      renderer.setSize(w, h)
+    }
+    window.addEventListener('resize', resize)
+
+    let raf, t = 0
+    const animate = () => {
+      t += 0.005
+      mx += (tmx - mx) * 0.04
+      my += (tmy - my) * 0.04
+
+      // Slow auto-rotation + cursor tilt
+      group.rotation.y += 0.0028
+      group.rotation.x = my * 0.35 + Math.sin(t * 0.8) * 0.12
+      group.rotation.z = mx * 0.18 + Math.cos(t * 0.6) * 0.07
+
+      // Inner counter-rotates for living motion
+      innerLine.rotation.y -= 0.005
+      innerLine.rotation.x += 0.003
+      innerFill.rotation.y -= 0.005
+      innerFill.rotation.x += 0.003
+
+      // Breathing scale
+      const breath = 1 + Math.sin(t * 1.4) * 0.025
+      group.scale.setScalar(breath)
+
+      // Dust slow orbit
+      dust.rotation.y -= 0.0015
+      dust.rotation.x += 0.0008
+
+      renderer.render(scene, camera)
+      raf = requestAnimationFrame(animate)
+    }
+    animate()
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('resize', resize)
+      outerGeo.dispose(); innerGeo.dispose()
+      outerEdges.dispose(); innerEdges.dispose()
+      outerLineMat.dispose(); innerLineMat.dispose()
+      outerFillMat.dispose(); innerFillMat.dispose()
+      dustGeo.dispose(); dustMat.dispose()
+      renderer.dispose()
+      if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement)
+    }
+  }, [])
+  return <div ref={ref} className="absolute inset-0 pointer-events-none" />
 }
 
 function HeroCanvas() {
@@ -506,6 +675,10 @@ export default function Page() {
         opacity: 0.25,
         scrollTrigger: { trigger: '#hero', start: 'top top', end: 'bottom top', scrub: true },
       })
+      gsap.to('.hero-3d', {
+        opacity: 0.15, scale: 1.2,
+        scrollTrigger: { trigger: '#hero', start: 'top top', end: 'bottom top', scrub: true },
+      })
 
       const idLines = gsap.utils.toArray('.identity-line')
       const idTl = gsap.timeline({
@@ -661,6 +834,10 @@ export default function Page() {
       <section id="hero" className="relative h-screen w-full overflow-hidden grain">
         <div className="hero-bg absolute inset-0">
           <HeroCanvas />
+        </div>
+        {/* Three.js wireframe icosahedron + dust halo (mid layer) */}
+        <div className="hero-3d absolute inset-0 z-[1]" style={{ mixBlendMode: 'multiply' }}>
+          <Hero3D />
         </div>
         <div className="relative z-10 h-full flex flex-col justify-between px-6 md:px-10 pt-28 pb-12">
           <div className="hero-meta flex items-center justify-between text-xs tracking-[0.25em] uppercase text-ink-soft">
